@@ -1,0 +1,4 @@
+*.yml
+.idea
+.venv
+chart.png
