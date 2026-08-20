@@ -2,3 +2,4 @@
 .idea
 .venv
 chart.png
+*.json

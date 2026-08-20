@@ -2,27 +2,58 @@ import requests
 import schedule
 import time
 import yaml
+import json
+import os
 import matplotlib.pyplot as plt
 import datetime
 
 class CumulativeFlowDiagram():
+    DATA_FILE = 'data.json'
+
     def __init__(self) -> None:
        schedule.every(3).seconds.do(self.chart_data_task) ## todo every hour
        stream = open('token.yml', 'r')
        token_file = yaml.safe_load(stream)
        self.token = token_file['token']
        self.data = []
+       self.load_data()
        self.headers = {
             'Authorization': 'Bearer ' + self.token
         }
-
-       while True:
-           schedule.run_pending()
-           time.sleep(1)
+       try:
+           while True:
+               schedule.run_pending()
+               time.sleep(1)
+       finally:
+           plt.close('all')
 
     def chart_data_task(self):
         data = self.acquire_data()
         self.save_data(data)
+
+    def load_data(self):
+        if not os.path.exists(self.DATA_FILE):
+            return
+        try:
+            with open(self.DATA_FILE, 'r', encoding='utf-8') as stream:
+                raw_entries = json.load(stream)
+            self.data = [
+                (datetime.datetime.fromisoformat(entry['timestamp']), entry['data'])
+                for entry in raw_entries
+            ]
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            print(f'Warning: could not read history from {self.DATA_FILE}, starting with an empty chart')
+            self.data = []
+
+    def persist_data(self):
+        entries = [
+            {'timestamp': timestamp.isoformat(), 'data': data}
+            for timestamp, data in self.data
+        ]
+        tmp_file = self.DATA_FILE + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as stream:
+            json.dump(entries, stream, indent=2)
+        os.replace(tmp_file, self.DATA_FILE)
 
     def get_statuses(self):
         response = requests.get('https://project.glia.org/api/v3/statuses', headers=self.headers)
@@ -62,12 +93,14 @@ class CumulativeFlowDiagram():
         timestamped_data = datetime.datetime.now(datetime.UTC), data
 
         self.data.append(timestamped_data)
+        self.persist_data()
 
         x = list(timestamp for timestamp, _ in self.data)
 
-        data_points = list(list(datum.values()) for _, datum in self.data)
-        y = data_points
-        y = list(map(list, zip(*y))) #rotate the Y axis list
+        y = [
+            [datum.get(status, 0) for _, datum in self.data]
+            for status in statuses
+        ]
 
         self.render(statuses, x, y)
 
@@ -85,4 +118,5 @@ class CumulativeFlowDiagram():
         plt.savefig('chart.png')
 
 
-CumulativeFlowDiagram()
+if __name__ == '__main__':
+    CumulativeFlowDiagram()
