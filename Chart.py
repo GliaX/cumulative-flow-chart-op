@@ -34,6 +34,8 @@ class CumulativeFlowDiagram():
 
     def chart_data_task(self):
         data = self.acquire_data()
+        if self.data and all(self.data[-1][1].get(status, 0) == count for status, count in data.items()):
+            return
         self.save_data(data)
         self.upload_chart()
 
