@@ -180,45 +180,53 @@ class CumulativeFlowDiagram():
         return attachment_id
 
     def find_or_create_chart_widget(self):
-        grid = None
+        grid = self.find_grid()
+        if grid is None:
+            raise RuntimeError(f'no overview grid found for {self.project}')
+        widget = self.find_widget(grid)
+        if widget is None:
+            widget = self.create_chart_widget(grid)
+        self.grid_id = grid['id']
+        self.widget_id = widget['id']
+        return grid, widget
+
+    def find_grid(self):
         if self.grid_id is not None:
             response = requests.get(f'{self.API_BASE}/api/v3/grids/{self.grid_id}', headers=self.headers)
             if response.ok and response.json()['_links']['scope']['href'] == f'/projects/{self.project}':
-                grid = response.json()
-        if grid is None:
-            response = requests.get(f'{self.API_BASE}/api/v3/grids', headers=self.headers, params={'pageSize': '100'})
-            response.raise_for_status()
-            for candidate in response.json()['_embedded']['elements']:
-                if candidate['_links']['scope']['href'] == f'/projects/{self.project}':
-                    grid = candidate
-                    break
-        if grid is None:
-            raise RuntimeError(f'no overview grid found for {self.project}')
+                return response.json()
+        response = requests.get(f'{self.API_BASE}/api/v3/grids', headers=self.headers, params={'pageSize': '100'})
+        response.raise_for_status()
+        for candidate in response.json()['_embedded']['elements']:
+            if candidate['_links']['scope']['href'] == f'/projects/{self.project}':
+                return candidate
+        return None
+
+    def find_widget(self, grid):
         widgets = grid['widgets']
         widget = next((w for w in widgets if w['id'] == self.widget_id), None)
         if widget is None:
             widget = next((w for w in widgets if w['identifier'] == 'custom_text' and w['options'].get('name') == 'Cumulative flow diagram'), None)
-        if widget is None:
-            widget = {
-                'identifier': 'custom_text',
-                'startRow': grid['rowCount'],
-                'endRow': grid['rowCount'] + 1,
-                'startColumn': 1,
-                'endColumn': 2,
-                'options': {'name': 'Cumulative flow diagram', 'text': {'format': 'markdown', 'raw': ''}},
-            }
-            widgets.append(widget)
-            response = requests.patch(
-                f'{self.API_BASE}/api/v3/grids/{grid["id"]}',
-                headers={**self.headers, 'Content-Type': 'application/json'},
-                json={'rowCount': grid['rowCount'] + 1, 'widgets': widgets},
-            )
-            response.raise_for_status()
-            grid = response.json()
-            widget = next(w for w in grid['widgets'] if w['identifier'] == 'custom_text' and w['options'].get('name') == 'Cumulative flow diagram')
-        self.grid_id = grid['id']
-        self.widget_id = widget['id']
-        return grid, widget
+        return widget
+
+    def create_chart_widget(self, grid):
+        widget = {
+            'identifier': 'custom_text',
+            'startRow': grid['rowCount'],
+            'endRow': grid['rowCount'] + 1,
+            'startColumn': 1,
+            'endColumn': 2,
+            'options': {'name': 'Cumulative flow diagram', 'text': {'format': 'markdown', 'raw': ''}},
+        }
+        grid['widgets'].append(widget)
+        response = requests.patch(
+            f'{self.API_BASE}/api/v3/grids/{grid["id"]}',
+            headers={**self.headers, 'Content-Type': 'application/json'},
+            json={'rowCount': grid['rowCount'] + 1, 'widgets': grid['widgets']},
+        )
+        response.raise_for_status()
+        updated = response.json()
+        return next(w for w in updated['widgets'] if w['identifier'] == 'custom_text' and w['options'].get('name') == 'Cumulative flow diagram')
 
     def delete_stale_attachment(self):
         if self.attachment_id is None:
@@ -238,7 +246,5 @@ if __name__ == '__main__':
         while True:
             schedule.run_pending()
             time.sleep(1)
-    except KeyboardInterrupt:
-        pass
     finally:
         plt.close('all')
