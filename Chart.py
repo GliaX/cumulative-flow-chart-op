@@ -8,29 +8,26 @@ import matplotlib.pyplot as plt
 import datetime
 
 class CumulativeFlowDiagram():
-    DATA_FILE = 'data.json'
+    DATA_FILE = 'data-{}.json'
     CHART_FILE = 'chart.png'
     API_BASE = 'https://project.glia.org'
-    PROJECT = 'miscellaneous-slash-small-parts'
+    PROJECTS = ['miscellaneous-slash-small-parts']
     CHART_IMG = '<img class="op-uc-image op-uc-image_inline" src="/api/v3/attachments/{attachment_id}/content">'
 
-    def __init__(self) -> None:
+    def __init__(self, project) -> None:
+       self.project = project
        schedule.every(3).seconds.do(self.chart_data_task) ## todo every hour
        stream = open('token.yml', 'r')
        token_file = yaml.safe_load(stream)
        self.token = token_file['token']
        self.data = []
        self.attachment_id = None
+       self.grid_id = None
+       self.widget_id = None
        self.load_data()
        self.headers = {
             'Authorization': 'Bearer ' + self.token
         }
-       try:
-           while True:
-               schedule.run_pending()
-               time.sleep(1)
-       finally:
-           plt.close('all')
 
     def chart_data_task(self):
         data = self.acquire_data()
@@ -40,10 +37,11 @@ class CumulativeFlowDiagram():
         self.upload_chart()
 
     def load_data(self):
-        if not os.path.exists(self.DATA_FILE):
+        data_file = self.DATA_FILE.format(self.project)
+        if not os.path.exists(data_file):
             return
         try:
-            with open(self.DATA_FILE, 'r', encoding='utf-8') as stream:
+            with open(data_file, 'r', encoding='utf-8') as stream:
                 raw = json.load(stream)
                 if isinstance(raw, list):
                     raw = {'entries': raw}
@@ -52,20 +50,26 @@ class CumulativeFlowDiagram():
                     for entry in raw['entries']
                 ]
                 self.attachment_id = raw.get('attachmentId')
+                self.grid_id = raw.get('gridId')
+                self.widget_id = raw.get('widgetId')
         except (json.JSONDecodeError, KeyError, ValueError, TypeError):
-            print(f'Warning: could not read history from {self.DATA_FILE}, starting with an empty chart')
+            print(f'Warning: could not read history from {data_file}, starting with an empty chart')
             self.data = []
+            self.attachment_id = None
+            self.grid_id = None
+            self.widget_id = None
 
     def persist_data(self):
         entries = [
             {'timestamp': timestamp.isoformat(), 'data': data}
             for timestamp, data in self.data
         ]
-        state = {'entries': entries, 'attachmentId': self.attachment_id}
-        tmp_file = self.DATA_FILE + '.tmp'
+        state = {'entries': entries, 'attachmentId': self.attachment_id, 'gridId': self.grid_id, 'widgetId': self.widget_id}
+        data_file = self.DATA_FILE.format(self.project)
+        tmp_file = data_file + '.tmp'
         with open(tmp_file, 'w', encoding='utf-8') as stream:
             json.dump(state, stream, indent=2)
-        os.replace(tmp_file, self.DATA_FILE)
+        os.replace(tmp_file, data_file)
 
     def get_statuses(self):
         response = requests.get(f'{self.API_BASE}/api/v3/statuses', headers=self.headers)
@@ -84,7 +88,7 @@ class CumulativeFlowDiagram():
             'showSums': 'false',
         }
 
-        response = requests.get(f'{self.API_BASE}/api/v3/workspaces/{self.PROJECT}/work_packages', params=params, headers=self.headers)
+        response = requests.get(f'{self.API_BASE}/api/v3/workspaces/{self.project}/work_packages', params=params, headers=self.headers)
         response_json = response.json()
         keys = ['value', 'count']
         groups = response_json["groups"]
@@ -130,7 +134,7 @@ class CumulativeFlowDiagram():
         plt.savefig(self.CHART_FILE)
 
     def get_project(self):
-        response = requests.get(f'{self.API_BASE}/api/v3/projects/{self.PROJECT}', headers=self.headers)
+        response = requests.get(f'{self.API_BASE}/api/v3/projects/{self.project}', headers=self.headers)
         response.raise_for_status()
         return response.json()
 
@@ -141,19 +145,20 @@ class CumulativeFlowDiagram():
             raw = raw.replace(self.CHART_IMG.format(attachment_id=self.attachment_id), '')
         new_raw = f'{raw.rstrip()}\n\n{self.CHART_IMG.format(attachment_id=attachment_id)}'
         response = requests.patch(
-            f'{self.API_BASE}/api/v3/projects/{self.PROJECT}',
+            f'{self.API_BASE}/api/v3/projects/{self.project}',
             headers={**self.headers, 'Content-Type': 'application/json'},
             json={'description': {'format': 'markdown', 'raw': new_raw}},
         )
         response.raise_for_status()
 
     def upload_chart(self):
+        grid, widget = self.find_or_create_chart_widget()
         with open(self.CHART_FILE, 'rb') as stream:
             response = requests.post(
-                f'{self.API_BASE}/api/v3/attachments',
+                f'{self.API_BASE}/api/v3/grids/{self.grid_id}/attachments',
                 headers=self.headers,
                 files={
-                    'metadata': (None, json.dumps({'fileName': self.CHART_FILE}), 'application/json'),
+                    'metadata': (None, json.dumps({'fileName': self.CHART_FILE, 'contentType': 'image/png'}), 'application/json'),
                     'file': (self.CHART_FILE, stream, 'image/png'),
                 },
             )
@@ -161,11 +166,59 @@ class CumulativeFlowDiagram():
         attachment_id = response.json()['id']
 
         self.update_project_description(attachment_id)
+        widget['options']['text'] = {'format': 'markdown', 'raw': self.CHART_IMG.format(attachment_id=attachment_id)}
+        response = requests.patch(
+            f'{self.API_BASE}/api/v3/grids/{self.grid_id}',
+            headers={**self.headers, 'Content-Type': 'application/json'},
+            json={'widgets': grid['widgets']},
+        )
+        response.raise_for_status()
         self.delete_stale_attachment()
 
         self.attachment_id = attachment_id
         self.persist_data()
         return attachment_id
+
+    def find_or_create_chart_widget(self):
+        grid = None
+        if self.grid_id is not None:
+            response = requests.get(f'{self.API_BASE}/api/v3/grids/{self.grid_id}', headers=self.headers)
+            if response.ok and response.json()['_links']['scope']['href'] == f'/projects/{self.project}':
+                grid = response.json()
+        if grid is None:
+            response = requests.get(f'{self.API_BASE}/api/v3/grids', headers=self.headers, params={'pageSize': '100'})
+            response.raise_for_status()
+            for candidate in response.json()['_embedded']['elements']:
+                if candidate['_links']['scope']['href'] == f'/projects/{self.project}':
+                    grid = candidate
+                    break
+        if grid is None:
+            raise RuntimeError(f'no overview grid found for {self.project}')
+        widgets = grid['widgets']
+        widget = next((w for w in widgets if w['id'] == self.widget_id), None)
+        if widget is None:
+            widget = next((w for w in widgets if w['identifier'] == 'custom_text' and w['options'].get('name') == 'Cumulative flow diagram'), None)
+        if widget is None:
+            widget = {
+                'identifier': 'custom_text',
+                'startRow': grid['rowCount'],
+                'endRow': grid['rowCount'] + 1,
+                'startColumn': 1,
+                'endColumn': 2,
+                'options': {'name': 'Cumulative flow diagram', 'text': {'format': 'markdown', 'raw': ''}},
+            }
+            widgets.append(widget)
+            response = requests.patch(
+                f'{self.API_BASE}/api/v3/grids/{grid["id"]}',
+                headers={**self.headers, 'Content-Type': 'application/json'},
+                json={'rowCount': grid['rowCount'] + 1, 'widgets': widgets},
+            )
+            response.raise_for_status()
+            grid = response.json()
+            widget = next(w for w in grid['widgets'] if w['identifier'] == 'custom_text' and w['options'].get('name') == 'Cumulative flow diagram')
+        self.grid_id = grid['id']
+        self.widget_id = widget['id']
+        return grid, widget
 
     def delete_stale_attachment(self):
         if self.attachment_id is None:
@@ -180,4 +233,12 @@ class CumulativeFlowDiagram():
 
 
 if __name__ == '__main__':
-    CumulativeFlowDiagram()
+    diagrams = [CumulativeFlowDiagram(project) for project in CumulativeFlowDiagram.PROJECTS]
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        plt.close('all')
