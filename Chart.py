@@ -185,7 +185,7 @@ class CumulativeFlowDiagram():
             raise RuntimeError(f'no overview grid found for {self.project}')
         widget = self.find_widget(grid)
         if widget is None:
-            widget = self.create_chart_widget(grid)
+            grid, widget = self.create_chart_widget(grid)
         self.grid_id = grid['id']
         self.widget_id = widget['id']
         return grid, widget
@@ -226,7 +226,7 @@ class CumulativeFlowDiagram():
         )
         response.raise_for_status()
         updated = response.json()
-        return next(w for w in updated['widgets'] if w['identifier'] == 'custom_text' and w['options'].get('name') == 'Cumulative flow diagram')
+        return updated, next(w for w in updated['widgets'] if w['identifier'] == 'custom_text' and w['options'].get('name') == 'Cumulative flow diagram')
 
     def delete_stale_attachment(self):
         if self.attachment_id is None:
