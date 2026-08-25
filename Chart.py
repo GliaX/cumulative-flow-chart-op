@@ -12,6 +12,7 @@ class CumulativeFlowDiagram():
     CHART_FILE = 'chart.png'
     API_BASE = 'https://project.glia.org'
     PROJECTS = ['miscellaneous-slash-small-parts']
+    EXCLUDED_STATUSES = {'Scheduled', 'To be scheduled'}
     CHART_IMG = '<img class="op-uc-image op-uc-image_inline" src="/api/v3/attachments/{attachment_id}/content">'
 
     def __init__(self, project) -> None:
@@ -76,7 +77,7 @@ class CumulativeFlowDiagram():
         response_json = response.json()
         statuses_collection = response_json['_embedded']['elements']
         statuses = list([status['name'] for status in statuses_collection])
-        return statuses
+        return [status for status in statuses if status not in self.EXCLUDED_STATUSES]
 
     def acquire_data(self):
         params = {
@@ -99,7 +100,7 @@ class CumulativeFlowDiagram():
         data.reverse()
         for datum in data:
             data_returned.update(datum)
-        return data_returned # "New" needs to be on top with "Closed" on the bottom
+        return {status: count for status, count in data_returned.items() if status not in self.EXCLUDED_STATUSES} # "New" needs to be on top with "Closed" on the bottom
 
     def save_data(self, data):
         statuses = self.get_statuses()
