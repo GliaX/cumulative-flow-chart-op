@@ -83,7 +83,7 @@ class CumulativeFlowDiagram():
         params = {
             'offset': '1',
             'pageSize': '0',
-            'filters': '[{ "status_id": { "operator": "o", "values": null }}]',
+            'filters': '[]',
             'sortBy': '[["id", "asc"]]',
             'groupBy': 'status',
             'showSums': 'false',
