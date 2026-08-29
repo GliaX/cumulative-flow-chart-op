@@ -11,7 +11,7 @@ class CumulativeFlowDiagram():
     DATA_FILE = 'data-{}.json'
     CHART_FILE = 'chart.png'
     API_BASE = 'https://project.glia.org'
-    PROJECTS = ['miscellaneous-slash-small-parts']
+    PROJECTS = ['miscellaneous-slash-small-parts', 'tourniquet', 'gaza-work']
     EXCLUDED_STATUSES = {'Scheduled', 'To be scheduled'}
     CHART_IMG = '<img class="op-uc-image op-uc-image_inline" src="/api/v3/attachments/{attachment_id}/content">'
 
@@ -211,10 +211,11 @@ class CumulativeFlowDiagram():
         return widget
 
     def create_chart_widget(self, grid):
+        row = max(w['endRow'] for w in grid['widgets'])
         widget = {
             'identifier': 'custom_text',
-            'startRow': grid['rowCount'],
-            'endRow': grid['rowCount'] + 1,
+            'startRow': row,
+            'endRow': row + 1,
             'startColumn': 1,
             'endColumn': 2,
             'options': {'name': 'Cumulative flow diagram', 'text': {'format': 'markdown', 'raw': ''}},
