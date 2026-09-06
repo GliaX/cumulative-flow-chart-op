@@ -11,13 +11,26 @@ class CumulativeFlowDiagram():
     DATA_FILE = 'data-{}.json'
     CHART_FILE = 'chart.png'
     API_BASE = 'https://project.glia.org'
-    PROJECTS = ['miscellaneous-slash-small-parts', 'tourniquet', 'gaza-work']
-    EXCLUDED_STATUSES = {'Scheduled', 'To be scheduled'}
+    PROJECTS = ['miscellaneous-slash-small-parts', 'tourniquet', 'gaza-work', 'hikma-health']
+    ALLOWED_STATUSES = [
+        'New',
+        'In specification',
+        'Specified',
+        'Confirmed',
+        'In progress',
+        'Developed',
+        'In testing',
+        'Tested',
+        'Test failed',
+        'Closed',
+        'On hold',
+        'Rejected',
+    ]
     CHART_IMG = '<img class="op-uc-image op-uc-image_inline" src="/api/v3/attachments/{attachment_id}/content">'
 
     def __init__(self, project) -> None:
        self.project = project
-       schedule.every(3).seconds.do(self.chart_data_task) ## todo every hour
+       schedule.every(2).minutes.do(self.chart_data_task) ## todo every hour
        stream = open('token.yml', 'r')
        token_file = yaml.safe_load(stream)
        self.token = token_file['token']
@@ -77,7 +90,7 @@ class CumulativeFlowDiagram():
         response_json = response.json()
         statuses_collection = response_json['_embedded']['elements']
         statuses = list([status['name'] for status in statuses_collection])
-        return [status for status in statuses if status not in self.EXCLUDED_STATUSES]
+        return [status for status in statuses if status in self.ALLOWED_STATUSES]
 
     def acquire_data(self):
         params = {
@@ -100,7 +113,7 @@ class CumulativeFlowDiagram():
         data.reverse()
         for datum in data:
             data_returned.update(datum)
-        return {status: count for status, count in data_returned.items() if status not in self.EXCLUDED_STATUSES} # "New" needs to be on top with "Closed" on the bottom
+        return {status: count for status, count in data_returned.items() if status in self.ALLOWED_STATUSES} # "New" needs to be on top with "Closed" on the bottom
 
     def save_data(self, data):
         statuses = self.get_statuses()
