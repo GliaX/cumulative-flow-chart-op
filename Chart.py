@@ -11,7 +11,7 @@ class CumulativeFlowDiagram():
     DATA_FILE = 'data-{}.json'
     CHART_FILE = 'chart.png'
     API_BASE = 'https://project.glia.org'
-    PROJECTS = ['miscellaneous-slash-small-parts', 'tourniquet', 'gaza-work', 'hikma-health']
+    PROJECTS = ['miscellaneous-slash-small-parts', 'tourniquet', 'gaza-work', 'hikma-health','social-media']
     ALLOWED_STATUSES = [
         'New',
         'In specification',
